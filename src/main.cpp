@@ -48,14 +48,14 @@ HardwareSerial BTSERAIL(PA3, PA2);
 
 #define LIGHT_SENSOR PA1
 #define INPUT1 PA4
-#define INPUT1 PA5
-#define INPUT1 PA6
-#define INPUT1 PA7
+#define INPUT2 PA5
+#define INPUT3 PA6
+#define INPUT4 PA7
 
 void setup() {
 
   //init rtc
-  rtc.begin();
+  rtc.begin(false, STM32RTC::HOUR_24);
 
   //use seccond SPI module
   SPI.setMISO(PB14);
