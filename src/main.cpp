@@ -20,6 +20,8 @@ XPT2046 touch(/*cs=*/ PB3, /*irq=*/ PB4);
 #define SD_CS PB7
 #define SD_DET PB8
 File myFile;
+#define SD_DET_DELAY 10
+bool sd_ok, sd_err;
 
 #include <mcp_can.h>
 #define CAN0_INT PB5                              /* Set INT to pin 2 (This rarely changes)   */
@@ -52,6 +54,8 @@ HardwareSerial BTSERAIL(PA3, PA2);
 #define INPUT3 PA6
 #define INPUT4 PA7
 
+
+bool can_ok, mpu_ok, hmc_ok, tmp_ok;
 void setup() {
 
   //init rtc
@@ -73,8 +77,8 @@ void setup() {
   touch.setCalibration(209, 1759, 1775, 273);//we need to polish this, also create a calibration sceme
 
   //initialize canbus module
-  if(!CAN0.begin(MCP_STDEXT, CAN_500KBPS, MCP_16MHZ) == CAN_OK){
-    
+  if(CAN0.begin(MCP_STDEXT, CAN_500KBPS, MCP_16MHZ) == CAN_OK){
+    can_ok = 1;
   }
 
   //we do that later
@@ -96,17 +100,15 @@ void setup() {
   Wire.setSDA(PB11);
 
   //initialize mpu
-  accelgyro.initialize();
+  mpu_ok = accelgyro.testConnection();
+  if(mpu_ok)
+    accelgyro.initialize();
 
   // initialize compass
-  if(!compass.begin()){
-
-  }
+  hmc_ok = compass.begin();
 
   //initialize temp/humid sensor
-  if(!aht10.begin()){
-
-  }
+  tmp_ok = aht10.begin();
 
 
 }
@@ -116,7 +118,27 @@ void loop() {
 }
 
 void handle_gps(){
+
   if(GPSSERIAL.available()){
     valid_gps = gps.encode(GPSSERIAL.read());
   }
+
+}
+
+void handle_sd(){
+
+  if(!digitalRead(SD_DET) && !sd_ok && !sd_err){
+    delay(SD_DET_DELAY);
+    if(!SD.begin(SD_CS)){
+      sd_ok = 0;
+      sd_err = 1;
+    }else{
+      sd_ok = 1;
+    }
+  }else if(digitalRead(SD_DET) && (sd_ok || sd_err)){
+    SD.end();
+    sd_ok = 0;
+    sd_err = 0;
+  }
+
 }
