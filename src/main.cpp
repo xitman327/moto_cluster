@@ -23,9 +23,9 @@ File myFile;
 #define SD_DET_DELAY 10
 bool sd_ok, sd_err;
 
-#include <mcp_can.h>
-#define CAN0_INT PB5                              /* Set INT to pin 2 (This rarely changes)   */
-MCP_CAN CAN0(PB6);                                /* Set CS to pin 9 (Old shields use pin 10) */
+#include <mcp2515.h>
+MCP2515 CAN(PA4, 10000000UL, &SPI);
+#define CAN0_INT PB5
 
 #include <Adafruit_NeoPixel.h>
 #define NEOPIXEL_PIN PB9
@@ -55,31 +55,57 @@ HardwareSerial BTSERAIL(PA3, PA2);
 #define INPUT4 PA7
 
 
-bool can_ok, mpu_ok, hmc_ok, tmp_ok;
+bool can_ok, mpu_ok, hmc_ok, tmp_ok, tft_ok;
 void setup() {
+
+  __HAL_AFIO_REMAP_SWJ_NOJTAG();
+
+  //init first for debugging
+  BTSERAIL.begin(115200);
+  BTSERAIL.println("starting...........");
+  BTSERAIL.println("BTSERAIL ok");
 
   //init rtc
   rtc.begin(false, STM32RTC::HOUR_24);
+  BTSERAIL.println("RTC ok");
 
   //use seccond SPI module
-  SPI.setMISO(PB14);
-  SPI.setMOSI(PB15);
-  SPI.setSCLK(PB13);
-  SPI.setSSEL(-1);
+  // SPI.setMISO(PB14);
+  // SPI.setMOSI(PB15);
+  // SPI.setSCLK(PB13);
+  // SPI.begin();
+
+  //initialize canbus module
+  uint8_t y;// = CAN0.begin(MCP_STDEXT, CAN_500KBPS, MCP_8MHZ);
+  y = CAN.reset();
+  if(!y){
+    can_ok = 1;
+    BTSERAIL.println("can ok");
+    CAN.setBitrate(CAN_500KBPS);
+    CAN.setNormalMode();
+  }else{
+    BTSERAIL.print("can failled ");
+    BTSERAIL.println(y);
+  }
 
   //init LCD
   tft.begin();
-  tft.setRotation(0);
+  uint8_t x = tft.readcommand8(ILI9488_RDMODE);
+  if(x == 0xff || x == 0x00){
+    BTSERAIL.println("tft failled");
+    tft_ok = 0;
+  }else{
+    BTSERAIL.println("tft ok");
+    tft_ok = 1;
+    tft.setRotation(0);
+  }
+  
 
   //init touch
   touch.begin(tft.width(), tft.height());
   touch.setRotation(touch.ROT0);
   touch.setCalibration(209, 1759, 1775, 273);//we need to polish this, also create a calibration sceme
-
-  //initialize canbus module
-  if(CAN0.begin(MCP_STDEXT, CAN_500KBPS, MCP_16MHZ) == CAN_OK){
-    can_ok = 1;
-  }
+  BTSERAIL.println("touch ok");
 
   //we do that later
   // if (!SD.begin(SD_CS)) {
@@ -88,12 +114,14 @@ void setup() {
 
   //init neopixels
   pixels.begin();
+  BTSERAIL.println("neopixel ok");
 
   //serial for gps
   GPSSERIAL.begin(9600);
+  BTSERAIL.println("gps ok");
 
   //serial for bluetooth
-  BTSERAIL.begin(115200);
+  //BTSERAIL.begin(115200);
 
   //i2c for sensors
   Wire.setSCL(PB10);
@@ -101,15 +129,31 @@ void setup() {
 
   //initialize mpu
   mpu_ok = accelgyro.testConnection();
-  if(mpu_ok)
+  if(mpu_ok){
     accelgyro.initialize();
+    BTSERAIL.println("MPU ok");
+  }else{
+    BTSERAIL.println("MPU failled");
+  }
+    
 
   // initialize compass
   hmc_ok = compass.begin();
+  if(hmc_ok){
+    BTSERAIL.println("HMC ok");
+  }else{
+    BTSERAIL.println("HMC failled");
+  }
 
   //initialize temp/humid sensor
   tmp_ok = aht10.begin();
+  if(tmp_ok){
+    BTSERAIL.println("TMP ok");
+  }else{
+    BTSERAIL.println("TMP failled");
+  }
 
+  BTSERAIL.println("END SETUP");
 
 }
 
