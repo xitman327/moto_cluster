@@ -30,7 +30,7 @@
 #elif defined(ESP8266)
   #include <pgmspace.h>
 #endif
-
+typedef volatile uint32_t RwReg;
 #ifdef ARDUINO_STM32_FEATHER
 typedef volatile uint32 RwReg;
 #endif
