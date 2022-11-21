@@ -24,7 +24,9 @@ File myFile;
 bool sd_ok, sd_err;
 
 #include <mcp2515.h>
-MCP2515 CAN(PA4, 10000000UL, &SPI);
+MCP2515 CAN(PB6, 10000000UL, &SPI);
+// #include <mcp_can.h>
+// MCP_CAN CAN0(PB6);  //CAN CS
 #define CAN0_INT PB5
 
 #include <Adafruit_NeoPixel.h>
@@ -32,10 +34,15 @@ MCP2515 CAN(PA4, 10000000UL, &SPI);
 #define NUMPIXELS 15 
 Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
-#include <TinyGPS.h>
-TinyGPS gps;
-bool valid_gps;
+// #include <TinyGPS.h>
+// TinyGPS gps;
 HardwareSerial GPSSERIAL(PA10, PA9);
+#include <NMEAGPS.h>
+//#include <GPSport.h>
+NMEAGPS  gps; // This parses the GPS characters
+gps_fix  fix; // This holds on to the latest values
+bool valid_gps;
+
 
 #include <MPU6050.h>
 MPU6050 accelgyro;  
@@ -56,6 +63,10 @@ HardwareSerial BTSERAIL(PA3, PA2);
 
 
 bool can_ok, mpu_ok, hmc_ok, tmp_ok, tft_ok;
+
+void handle_gps();
+void handle_sd();
+
 void setup() {
 
   __HAL_AFIO_REMAP_SWJ_NOJTAG();
@@ -70,10 +81,12 @@ void setup() {
   BTSERAIL.println("RTC ok");
 
   //use seccond SPI module
-  // SPI.setMISO(PB14);
-  // SPI.setMOSI(PB15);
-  // SPI.setSCLK(PB13);
-  // SPI.begin();
+  SPI.setMISO(PB14);
+  SPI.setMOSI(PB15);
+  SPI.setSCLK(PB13);
+  SPI.setSSEL(PB12);
+  // SPI.setClockDivider(SPI_CLOCK_DIV8);
+  //SPI.begin();
 
   //initialize canbus module
   uint8_t y;// = CAN0.begin(MCP_STDEXT, CAN_500KBPS, MCP_8MHZ);
@@ -87,6 +100,13 @@ void setup() {
     BTSERAIL.print("can failled ");
     BTSERAIL.println(y);
   }
+  // y = CAN0.begin(MCP_STDEXT, CAN_500KBPS, MCP_16MHZ);
+  // if(y == CAN_OK){
+  //   BTSERAIL.println("can ok");
+  // }else{
+  //   BTSERAIL.print("can failled ");
+  //   BTSERAIL.println(y);
+  // }
 
   //init LCD
   tft.begin();
@@ -118,7 +138,18 @@ void setup() {
 
   //serial for gps
   GPSSERIAL.begin(9600);
-  BTSERAIL.println("gps ok");
+  // GPSSERIAL.flush();
+  while(!gps.available( GPSSERIAL )){}
+  fix = gps.read();
+  // handle_gps();
+  //gpsPort.begin(9600);
+
+  if(gps.statistics.ok){
+    BTSERAIL.println("gps ok");
+  }else{
+    BTSERAIL.println("gps fail");
+  }
+  
 
   //serial for bluetooth
   //BTSERAIL.begin(115200);
@@ -126,6 +157,7 @@ void setup() {
   //i2c for sensors
   Wire.setSCL(PB10);
   Wire.setSDA(PB11);
+  Wire.begin();
 
   //initialize mpu
   mpu_ok = accelgyro.testConnection();
@@ -163,9 +195,9 @@ void loop() {
 
 void handle_gps(){
 
-  if(GPSSERIAL.available()){
-    valid_gps = gps.encode(GPSSERIAL.read());
-  }
+  // if(GPSSERIAL.available()){
+  //   valid_gps = gps.encode(GPSSERIAL.read());
+  // }
 
 }
 
