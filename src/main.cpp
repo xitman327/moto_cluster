@@ -64,6 +64,8 @@ HardwareSerial BTSERAIL(PA3, PA2);
 
 bool can_ok, mpu_ok, hmc_ok, tmp_ok, tft_ok;
 
+uint8_t random_startup;
+
 void handle_gps();
 void handle_sd();
 
@@ -125,7 +127,7 @@ void setup() {
   touch.begin(tft.width(), tft.height());
   touch.setRotation(touch.ROT0);
   touch.setCalibration(209, 1759, 1775, 273);//we need to polish this, also create a calibration sceme
-  BTSERAIL.println("touch ok");
+  BTSERAIL.println("touch ok?");
 
   //we do that later
   // if (!SD.begin(SD_CS)) {
@@ -134,16 +136,15 @@ void setup() {
 
   //init neopixels
   pixels.begin();
+  pixels.clear();
+  // pixels.setBrightness(250);
+  // pixels.fill(pixels.Color(255,0,0), 0, 2);
+  // pixels.fill(pixels.Color(255,255,0), 3, 14);
   BTSERAIL.println("neopixel ok");
 
   //serial for gps
   GPSSERIAL.begin(9600);
-  // GPSSERIAL.flush();
   while(!gps.available( GPSSERIAL )){}
-  fix = gps.read();
-  // handle_gps();
-  //gpsPort.begin(9600);
-
   if(gps.statistics.ok){
     BTSERAIL.println("gps ok");
   }else{
@@ -185,11 +186,23 @@ void setup() {
     BTSERAIL.println("TMP failled");
   }
 
+  pinMode(SD_DET, INPUT_PULLUP);
+  if(digitalRead(SD_DET) == HIGH){
+    BTSERAIL.println("sdcard not present");
+  }else{
+    BTSERAIL.println("sdcard pressent");
+  }
+
+  random_startup = random(0, 10);
+
   BTSERAIL.println("END SETUP");
 
 }
 
 void loop() {
+  lighting();
+  handle_sd();
+  handle_gps();
 
 }
 
@@ -198,6 +211,23 @@ void handle_gps(){
   // if(GPSSERIAL.available()){
   //   valid_gps = gps.encode(GPSSERIAL.read());
   // }
+  if(gps.available( GPSSERIAL )) {
+    //fix = gps.read();
+    if(gps.fix().status != fix.status){
+      switch (gps.fix().status){
+        case 0:
+          BTSERAIL.println("Lost/No Fix!");
+        break;
+        default:
+          BTSERAIL.print("Got Fix! ");
+          BTSERAIL.print(gps.fix().satellites);
+          BTSERAIL.println(" Sats");
+        break;
+
+      }
+    }
+    fix = gps.read();
+  }
 
 }
 
@@ -208,13 +238,44 @@ void handle_sd(){
     if(!SD.begin(SD_CS)){
       sd_ok = 0;
       sd_err = 1;
+      BTSERAIL.println("SDCARD ERROR!");
     }else{
       sd_ok = 1;
+      BTSERAIL.println("SDCARD MOUNTED!");
     }
   }else if(digitalRead(SD_DET) && (sd_ok || sd_err)){
     SD.end();
     sd_ok = 0;
     sd_err = 0;
+    BTSERAIL.println("SDCARD EJECTED");
+  }
+
+}
+bool start_anim_finished;
+byte anim_i;
+uint32_t default_anim[255] = {};
+void lighting(){
+  if(!pixels.canShow())
+    return;
+  
+  if(!sd_ok && !start_anim_finished){
+    uint32_t color;
+    for(int i; i<NUMPIXELS; i++){
+      if(i<3){
+        color = pixels.Color(85, 0, 0);
+      }else{
+        color = pixels.Color(85, 85, 0);
+      }
+      
+      pixels.setPixelColor(i, color * ((default_anim[anim_i] >> i*2) & 0x3));
+    }
+    pixels.show();
+    if(anim_i == 254){
+      start_anim_finished = 1;
+      return;
+    }
+    anim_i++;
+    return;
   }
 
 }
