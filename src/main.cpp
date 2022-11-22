@@ -261,7 +261,8 @@ void handle_gps(){
 
 }
 
-
+const char* anim_filenames[10] PROGMEM={"/ANI/0.txt", "/ANI/1.txt", "/ANI/2.txt", "/ANI/3.txt", "/ANI/4.txt","/ANI/5.txt","/ANI/6.txt","/ANI/7.txt","/ANI/8.txt","/ANI/9.txt"};
+uint8_t animNumber;
 void handle_sd(){
 
   if(!digitalRead(SD_DET) && !sd_ok && !sd_err){
@@ -280,12 +281,24 @@ void handle_sd(){
     sd_err = 0;
     BTSERAIL.println("SDCARD EJECTED");
   }
-
+  
   if(sd_ok && !start_anim_finished){
+
+    for(int i; i<10;i++){
+      if(SD.exists(anim_filenames[i])){
+        animNumber++;
+      }
+    }
     
-    if(SD.exists("/ANI/0.txt")){
-      myFile = SD.open("/ANI/0.txt");
-      BTSERAIL.println("oppened file /ANI/0.txt");
+    //BTSERAIL.println(animNumber);
+    randomSeed(analogRead(PA0));
+    uint8_t anim_number = random(0, animNumber);
+    //anim_number -= 1;
+    //BTSERAIL.println(anim_number);
+    if(SD.exists(anim_filenames[anim_number])){
+      myFile = SD.open(anim_filenames[anim_number]);
+      // BTSERAIL.print("oppened file ");
+      // BTSERAIL.println(anim_filenames[anim_number]);
       sdAnimFPS = myFile.parseInt();
       sdAnimBrightness = myFile.parseInt();
       sdAnimLength = myFile.parseInt();
@@ -297,12 +310,11 @@ void handle_sd(){
       playAnim( sdpixeldata , sdAnimFPS, sdAnimLength, false);
       start_anim_finished = 1;
     }else{
-      BTSERAIL.println("/ANI/0.txt does not exist");
+      // BTSERAIL.println("no animation exist");
       playAnim( paternPixelData , neoAnimFPS, ANIM_LENGTH, false);
       start_anim_finished = 1;
     }
   }else if(sd_err && !start_anim_finished){
-    BTSERAIL.println("no sd animation");
     playAnim( paternPixelData , neoAnimFPS, ANIM_LENGTH, false);
     start_anim_finished = 1;
   }
@@ -329,16 +341,9 @@ void lighting(){
   }
     
   uint32_t t;      // Current time in milliseconds
-  
   // Until the next animation frame interval has elapsed...
-  //while(((t = millis()) - prev) < (1000 / pixelFPS));
-
   if( ((t = millis()) - prev) > (1000 / pixelFPS) ){
-      // Show LEDs rendered on prior pass.  It's done this way so animation timing
-      // is a bit more consistent (frame rendering time may vary slightly).
     pixels.show();
-    
-    
     prev = t; // Save refresh time for next frame sync
 
     if(pixelBaseAddr) {
@@ -353,7 +358,6 @@ void lighting(){
           ( rgb        & 0xFF));
           
       }
-    
       
         if(pixelIdx >= pixelLen) { // End of animation table reached
           if(pixelLoop) { // Repeat animation
