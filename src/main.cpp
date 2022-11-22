@@ -6,12 +6,14 @@
 STM32RTC& rtc = STM32RTC::getInstance();
 
 #include <Adafruit_GFX.h>
-#include <ILI9488.h>
+// #include <ILI9488.h>
 #define TFT_CS         PB12
 #define TFT_DC         PA15
 #define TFT_LED        PA8
 #define TFT_RST        -1
-ILI9488 tft = ILI9488(TFT_CS, TFT_DC, TFT_RST);
+// ILI9488 tft = ILI9488(TFT_CS, TFT_DC, TFT_RST);
+// #include <Adafruit_PCD8544.h>
+// Adafruit_PCD8544 display = Adafruit_PCD8544(TFT_DC, TFT_CS, TFT_RST);
 
 #include <XPT2046.h>
 XPT2046 touch(/*cs=*/ PB3, /*irq=*/ PB4);
@@ -33,6 +35,20 @@ MCP2515 CAN(PB6, 10000000UL, &SPI);
 #define NEOPIXEL_PIN PB9
 #define NUMPIXELS 15 
 Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
+#include <neoAnim.h>
+uint32_t sdpixeldata[1000];
+uint16_t sdAnimLength, sdAnimFPS, sdAnimBrightness;
+
+// Global values used by the animation and sound functions
+uint32_t         *pixelBaseAddr; // Address of active animation table
+uint16_t          pixelLen,      // Number of pixels in active table
+                  pixelIdx,      // Index of first pixel of current frame
+                  audioLen;      // Number of audio samples in active table
+volatile uint16_t audioIdx;      // Index of current audio sample
+uint8_t           pixelFPS,      // Frames/second for active animation
+                 *audioBaseAddr; // Address of active sound table
+bool              pixelLoop,     // If true, animation repeats
+                  audioLoop;     // If true, audio repeats
 
 // #include <TinyGPS.h>
 // TinyGPS gps;
@@ -66,8 +82,14 @@ bool can_ok, mpu_ok, hmc_ok, tmp_ok, tft_ok;
 
 uint8_t random_startup;
 
+bool start_anim_finished;
+byte anim_i;
+uint32_t default_anim[255] = {};
+
+void lighting();
 void handle_gps();
 void handle_sd();
+void playAnim(const uint32_t *addr, uint8_t fps, uint16_t bytes, bool repeat);
 
 void setup() {
 
@@ -111,20 +133,24 @@ void setup() {
   // }
 
   //init LCD
-  tft.begin();
-  uint8_t x = tft.readcommand8(ILI9488_RDMODE);
-  if(x == 0xff || x == 0x00){
-    BTSERAIL.println("tft failled");
-    tft_ok = 0;
-  }else{
-    BTSERAIL.println("tft ok");
-    tft_ok = 1;
-    tft.setRotation(0);
-  }
+  // tft.begin();
+  // uint8_t x = tft.readcommand8(ILI9488_RDMODE);
+  // if(x == 0xff || x == 0x00){
+  //   BTSERAIL.println("tft failled");
+  //   tft_ok = 0;
+  // }else{
+  //   BTSERAIL.println("tft ok");
+  //   tft_ok = 1;
+  //   tft.setRotation(0);
+  // }
+  // display.begin();
+  // display.clearDisplay();
+  // display.print("hello world!");
+  // BTSERAIL.println("lcd ok");
   
 
   //init touch
-  touch.begin(tft.width(), tft.height());
+  touch.begin(480, 320);
   touch.setRotation(touch.ROT0);
   touch.setCalibration(209, 1759, 1775, 273);//we need to polish this, also create a calibration sceme
   BTSERAIL.println("touch ok?");
@@ -137,7 +163,8 @@ void setup() {
   //init neopixels
   pixels.begin();
   pixels.clear();
-  // pixels.setBrightness(250);
+  pixels.setBrightness(5);
+  pixels.show();
   // pixels.fill(pixels.Color(255,0,0), 0, 2);
   // pixels.fill(pixels.Color(255,255,0), 3, 14);
   BTSERAIL.println("neopixel ok");
@@ -195,11 +222,14 @@ void setup() {
 
   random_startup = random(0, 10);
 
+  //playAnim( paternPixelData , neoAnimFPS, ANIM_LENGTH, false);
+
   BTSERAIL.println("END SETUP");
 
 }
 
 void loop() {
+
   lighting();
   handle_sd();
   handle_gps();
@@ -231,6 +261,7 @@ void handle_gps(){
 
 }
 
+
 void handle_sd(){
 
   if(!digitalRead(SD_DET) && !sd_ok && !sd_err){
@@ -250,32 +281,93 @@ void handle_sd(){
     BTSERAIL.println("SDCARD EJECTED");
   }
 
-}
-bool start_anim_finished;
-byte anim_i;
-uint32_t default_anim[255] = {};
-void lighting(){
-  if(!pixels.canShow())
-    return;
-  
-  if(!sd_ok && !start_anim_finished){
-    uint32_t color;
-    for(int i; i<NUMPIXELS; i++){
-      if(i<3){
-        color = pixels.Color(85, 0, 0);
-      }else{
-        color = pixels.Color(85, 85, 0);
+  if(sd_ok && !start_anim_finished){
+    
+    if(SD.exists("/ANI/0.txt")){
+      myFile = SD.open("/ANI/0.txt");
+      BTSERAIL.println("oppened file /ANI/0.txt");
+      sdAnimFPS = myFile.parseInt();
+      sdAnimBrightness = myFile.parseInt();
+      sdAnimLength = myFile.parseInt();
+      for(int i; i < sdAnimLength * NUMPIXELS; i++){
+        sdpixeldata[i] = myFile.parseInt();
       }
-      
-      pixels.setPixelColor(i, color * ((default_anim[anim_i] >> i*2) & 0x3));
-    }
-    pixels.show();
-    if(anim_i == 254){
+      myFile.close();
+      pixels.setBrightness(sdAnimBrightness);
+      playAnim( sdpixeldata , sdAnimFPS, sdAnimLength, false);
       start_anim_finished = 1;
-      return;
+    }else{
+      BTSERAIL.println("/ANI/0.txt does not exist");
+      playAnim( paternPixelData , neoAnimFPS, ANIM_LENGTH, false);
+      start_anim_finished = 1;
     }
-    anim_i++;
+  }else if(sd_err && !start_anim_finished){
+    BTSERAIL.println("no sd animation");
+    playAnim( paternPixelData , neoAnimFPS, ANIM_LENGTH, false);
+    start_anim_finished = 1;
+  }
+
+}
+
+// Begin playing a NeoPixel animation from a PROGMEM table
+void playAnim(const uint32_t *addr, uint8_t fps, uint16_t bytes, bool repeat) {
+  pixelBaseAddr = addr;
+  if(addr) {
+    pixelFPS    = fps;
+    pixelLen    = bytes * NUMPIXELS;
+    pixelLoop   = repeat; //if set to 'repeat' it'll loop, set to 0 to play once only
+    pixelIdx    = 0;
+  } else {
+    //pixels.clear();
+  }
+}
+
+uint32_t prev = 0;
+void lighting(){
+  if(!pixels.canShow()){
     return;
   }
+    
+  uint32_t t;      // Current time in milliseconds
+  
+  // Until the next animation frame interval has elapsed...
+  //while(((t = millis()) - prev) < (1000 / pixelFPS));
+
+  if( ((t = millis()) - prev) > (1000 / pixelFPS) ){
+      // Show LEDs rendered on prior pass.  It's done this way so animation timing
+      // is a bit more consistent (frame rendering time may vary slightly).
+    pixels.show();
+    
+    
+    prev = t; // Save refresh time for next frame sync
+
+    if(pixelBaseAddr) {
+      for(uint8_t i=0; i<NUMPIXELS; i++) { // For each NeoPixel...
+        // Read pixel color from PROGMEM table
+        uint32_t rgb = pgm_read_dword(&pixelBaseAddr[pixelIdx++]);
+        // Expand 16-bit color to 24 bits using gamma tables
+        // RRRRRGGGGGGBBBBB -> RRRRRRRR GGGGGGGG BBBBBBBB
+        pixels.setPixelColor(i,
+          ( rgb >> 16  & 0xFF),
+          ( rgb >>  8 & 0xFF ),
+          ( rgb        & 0xFF));
+          
+      }
+    
+      
+        if(pixelIdx >= pixelLen) { // End of animation table reached
+          if(pixelLoop) { // Repeat animation
+            pixelIdx = 0; // Reset index to start of table
+          } else {        // else switch off LEDs
+            playAnim(NULL, neoAnimFPS, 0, false);
+          }
+        } 
+    
+    }
+  }
+
+
+
+  
 
 }
