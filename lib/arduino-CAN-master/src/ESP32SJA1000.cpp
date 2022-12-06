@@ -1,7 +1,7 @@
 // Copyright (c) Sandeep Mistry. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-#ifdef ARDUINO_ARCH_ESP32
+#ifdef ARDUINO_ARCH_ESP32_PREFER_JA1000
 
 #include "esp_intr.h"
 #include "soc/dport_reg.h"
@@ -122,6 +122,10 @@ int ESP32SJA1000Class::begin(long baudRate)
 
   modifyRegister(REG_BTR1, 0x80, 0x80); // SAM = 1
   writeRegister(REG_IER, 0xff); // enable all interrupts
+  if (ESP.getChipRevision() >= 2) 
+  {
+    modifyRegister(REG_IER, 0x10, 0); // From rev2 used as "divide BRP by 2"
+  }
 
   // set filter to allow anything
   writeRegister(REG_ACRn(0), 0x00);

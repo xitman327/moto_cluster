@@ -2,22 +2,6 @@
 #include <SPI.h>
 #include <Wire.h>
 
-// #include <STM32RTC.h>
-// STM32RTC& rtc = STM32RTC::getInstance();
-
-#include <Adafruit_GFX.h>
-// #include <ILI9488.h>
-#define TFT_CS         26
-#define TFT_DC         27
-#define TFT_LED        14
-#define TFT_RST        -1
-// ILI9488 tft = ILI9488(TFT_CS, TFT_DC, TFT_RST);
-// #include <Adafruit_PCD8544.h>
-// Adafruit_PCD8544 display = Adafruit_PCD8544(TFT_DC, TFT_CS, TFT_RST);
-
-#include <XPT2046.h>
-XPT2046 touch(/*cs=*/ 25, /*irq=*/ 2);
-
 #include <FS.h>
 #include <SD.h>
 #define SD_CS 15
@@ -28,6 +12,31 @@ bool sd_ok, sd_err;
 //const char* anim_filenames[10] PROGMEM={"/ANI/0.txt", "/ANI/1.txt", "/ANI/2.txt", "/ANI/3.txt", "/ANI/4.txt","/ANI/5.txt","/ANI/6.txt","/ANI/7.txt","/ANI/8.txt","/ANI/9.txt"};
 uint8_t animNumber;
 
+
+// #include <STM32RTC.h>
+// STM32RTC& rtc = STM32RTC::getInstance();
+
+#include <TFT_eSPI.h>      // Graphics library
+TFT_eSPI tft = TFT_eSPI(); // Invoke library
+
+// #include <Adafruit_GFX.h>
+// #include <ILI9488.h>
+// #define TFT_CS         26
+// #define TFT_DC         27
+ #define TFT_LED        14
+// #define TFT_RST        -1
+// ILI9488 tft = ILI9488(TFT_CS, TFT_DC, TFT_RST);
+// #include <Adafruit_PCD8544.h>
+// Adafruit_PCD8544 display = Adafruit_PCD8544(TFT_DC, TFT_CS, TFT_RST);
+
+#include <XPT2046.h>
+XPT2046 touch(/*cs=*/ 25, /*irq=*/ 2);
+
+
+#include <CAN.h> // the OBD2 library depends on the CAN library
+#include <OBD2.h>
+#define CAN_CS 5
+#define CAN_INT 4
 uint8_t msgType, errorType;
 bool canWaitingMsg;
 #define can_refresh 200
@@ -83,7 +92,7 @@ AHTxx aht10(AHTXX_ADDRESS_X38, AHT1x_SENSOR);
 
 
 
-#define LIGHT_SENSOR 32
+#define LIGHT_SENSOR 33
 #define INPUT1 34
 #define INPUT2 35
 #define INPUT3 36
@@ -105,67 +114,64 @@ void playAnim(const uint32_t *addr, uint8_t fps, uint16_t bytes, bool repeat, bo
 void handle_can();
 void handle_sensors();
 void displayInfo();
+void handle_bright();
+void handle_ui();
 
-#include <driver/twai.h>
-#include <driver/gpio.h>
-twai_message_t  tx_frame;
-twai_message_t  rx_frame;
+TaskHandle_t Task1;
+void Task1code( void * parameter) {
+  Serial.print("Task2 running on core ");
+  Serial.println(xPortGetCoreID());
 
-#define CAN_DEBUG 1
-esp_err_t setup_can_driver(){
- twai_general_config_t  general_config = TWAI_GENERAL_CONFIG_DEFAULT(GPIO_NUM_5,GPIO_NUM_4,TWAI_MODE_NORMAL); //{ 
-        // .mode = TWAI_MODE_NORMAL,
-        // .tx_io = (gpio_num_t)GPIO_NUM_5,
-        // .rx_io = (gpio_num_t)GPIO_NUM_4,
-        // .clkout_io = (gpio_num_t)CAN_IO_UNUSED,
-        // .bus_off_io = (gpio_num_t)CAN_IO_UNUSED,
-        // .tx_queue_len = 100,
-        // .rx_queue_len = 65,
-        // .alerts_enabled = CAN_ALERT_NONE,
-        // .clkout_divider = 0};
-    twai_timing_config_t  timing_config = TWAI_TIMING_CONFIG_500KBITS();
-    twai_filter_config_t  filter_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
-    esp_err_t error;
+  tft.init();
+  tft.setRotation(1);
+  // tft.begin();
+   tft.fillScreen(TFT_BLACK);
+   //analogWrite(TFT_LED, 255);
+   ledcWrite(0, 100);
+   tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+   tft.setTextSize(4);
+   tft.setCursor(10, 10);
+   tft.print("TFT OK!\n Hello World!");
 
-    error = twai_driver_install(&general_config, &timing_config, &filter_config);
-    if (error != ESP_OK)
-    {
-        #ifdef CAN_DEBUG
-        Serial.print("CAN Driver Install Error ");
-        Serial.println(error);
-        #endif
-        return error;
+   CAN.setPins(CAN_CS, CAN_INT);
+    if (!OBD2.begin()) {
+      Serial.println(F("CAN failed!"));
+      delay(1000);
+    } else {
+      Serial.println(F("CAN success"));
     }
 
-    // start CAN driver
-    error = twai_start();
-    if (error != ESP_OK)
-    {
-        #ifdef CAN_DEBUG
-        Serial.print("CAN Start Error ");
-        Serial.println(error);
-        #endif
-        return error;
-    }
-
-    #ifdef CAN_DEBUG
-    Serial.println("CAN Driver Started! ");
-    #endif
-    return ESP_OK;
+  for(;;) { //loop
+    handle_sd();
+    handle_can();
+    handle_ui();
+  }
 }
 
-
 void setup() {
-
-  // __HAL_AFIO_REMAP_SWJ_NOJTAG();
 
   //init first for debugging
   Serial.begin(115200);
   Serial.println("starting...........");
   Serial.println("Serial ok");
 
+  xTaskCreatePinnedToCore(
+      Task1code, /* Function to implement the task */
+      "Task1", /* Name of the task */
+      10000,  /* Stack size in words */
+      NULL,  /* Task input parameter */
+      0,  /* Priority of the task */
+      &Task1,  /* Task handle. */
+      0); /* Core where the task should run */
+      
+  Serial.print("Task1 running on core ");
+  Serial.println(xPortGetCoreID());
 
-  setup_can_driver();
+  pinMode(LIGHT_SENSOR, ANALOG);
+  pinMode(TFT_LED, OUTPUT);
+  ledcSetup(0, 5000, 8);
+  ledcAttachPin(TFT_LED, 0);
+   
 
   //init neopixels
   pixels.begin();
@@ -252,16 +258,46 @@ void setup() {
 void loop() {
 
   lighting();
-  handle_sd();
   handle_gps();
-  handle_can();
   if(hmc_ok && mpu_ok){
     handle_sensors();
   }
-  
+  handle_bright();
 
 
 }
+
+
+#define ui_refresh 100
+uint32_t ui_tm;
+bool ui_start;
+void handle_ui(){
+  if(millis() - ui_tm > ui_refresh){
+      ui_tm = millis();
+
+    if(!ui_start){
+      ui_start = 1;
+      
+    }
+
+
+  }
+}
+
+
+#define brt_refresh 100
+uint32_t brt_tm;
+int bright_min = 10, bright_max = 255, brightness;
+void handle_bright(){
+  if(millis() - brt_tm > brt_refresh){
+      brt_tm = millis();
+      brightness = map(analogRead(LIGHT_SENSOR), 0, 4095, bright_max, bright_min);
+      ledcWrite(0, brightness);
+      pixels.setBrightness(brightness);
+    }
+}
+
+
 #define tm_gps 500
 uint32_t tmgps;
 void handle_gps(){
@@ -275,6 +311,7 @@ void handle_gps(){
   }
 
 }
+
 
 
 void handle_sd(){
@@ -408,139 +445,141 @@ void handle_can(){
   if(millis() - can_tm > can_refresh){
     can_tm = millis();
 
-    rx_error = twai_receive(&rx_frame, pdMS_TO_TICKS(100));
-    Serial.println(esp_err_to_name(rx_error));
+  }
 
-    if(!canWaitingMsg){
-      switch(msgType){
-        case 0://engine rpm
-          //tx_frame.data = 0x2 | (0x01 << 8) | (0x0c << 16) | 0xAAAAAAAAAA000000;
-          tx_frame.flags = TWAI_MSG_FLAG_NONE;
-          tx_frame.identifier = 0x7DF;
-          tx_frame.data_length_code = 8;
-          tx_frame.data[0] = 0x02;
-          tx_frame.data[1] = 0x01;
-          tx_frame.data[2] = 0x0C;
-          tx_frame.data[3] = 0xAA;
-          tx_frame.data[4] = 0xAA;
-          tx_frame.data[5] = 0xAA;
-          tx_frame.data[6] = 0xAA;
-          tx_frame.data[7] = 0xAA;
-        break;
-        case 1://coolant temp
-          //tx_frame.data = 0x2 | (0x01 << 8) | (0x05 << 16) | 0xAAAAAAAAAA000000;
-          tx_frame.flags = TWAI_MSG_FLAG_NONE;
-          tx_frame.identifier = 0x7DF;
-          tx_frame.data_length_code = 8;
-          tx_frame.data[0] = 0x02;
-          tx_frame.data[1] = 0x01;
-          tx_frame.data[2] = 0x05;
-          tx_frame.data[3] = 0xAA;
-          tx_frame.data[4] = 0xAA;
-          tx_frame.data[5] = 0xAA;
-          tx_frame.data[6] = 0xAA;
-          tx_frame.data[7] = 0xAA;
-        break;
-        case 2:
-          //tx_frame.data = 0x2 | (0x01 << 8) | (0x42 << 16) | 0xAAAAAAAAAA000000;
-          tx_frame.flags = TWAI_MSG_FLAG_NONE;
-          tx_frame.identifier = 0x7DF;
-          tx_frame.data_length_code = 8;
-          tx_frame.data[0] = 0x02;
-          tx_frame.data[1] = 0x01;
-          tx_frame.data[2] = 0x42;
-          tx_frame.data[3] = 0xAA;
-          tx_frame.data[4] = 0xAA;
-          tx_frame.data[5] = 0xAA;
-          tx_frame.data[6] = 0xAA;
-          tx_frame.data[7] = 0xAA;
-        break;
-      }
+  //   rx_error = twai_receive(&rx_frame, pdMS_TO_TICKS(100));
+  //   Serial.println(esp_err_to_name(rx_error));
 
-      twai_clear_transmit_queue();
-      error_t error = twai_transmit(&tx_frame, pdMS_TO_TICKS(100));
-      if(error != ESP_OK){
-        Serial.print("CAN Transmit Error ");
-        Serial.println(esp_err_to_name(error));
-        if(error == ESP_ERR_INVALID_STATE){
-          Serial.println("Attemting recovery");
-          error = twai_initiate_recovery();
-          if(error != ESP_OK){
-            Serial.print("recovery failled ");
-            Serial.println(esp_err_to_name(error));
-            if(error == ESP_ERR_INVALID_STATE){
-              Serial.println("Attemting driver reinstall");
-              twai_driver_uninstall();
-              error = setup_can_driver();
-            }
-          }else{
-            Serial.print("recovery success ");
-          }
-        }
-      }else{
-        canWaitingMsg = 1;
-        cantmout = millis();
-      }
+  //   if(!canWaitingMsg){
+  //     switch(msgType){
+  //       case 0://engine rpm
+  //         //tx_frame.data = 0x2 | (0x01 << 8) | (0x0c << 16) | 0xAAAAAAAAAA000000;
+  //         tx_frame.flags = TWAI_MSG_FLAG_NONE;
+  //         tx_frame.identifier = 0x7DF;
+  //         tx_frame.data_length_code = 8;
+  //         tx_frame.data[0] = 0x02;
+  //         tx_frame.data[1] = 0x01;
+  //         tx_frame.data[2] = 0x0C;
+  //         tx_frame.data[3] = 0xAA;
+  //         tx_frame.data[4] = 0xAA;
+  //         tx_frame.data[5] = 0xAA;
+  //         tx_frame.data[6] = 0xAA;
+  //         tx_frame.data[7] = 0xAA;
+  //       break;
+  //       case 1://coolant temp
+  //         //tx_frame.data = 0x2 | (0x01 << 8) | (0x05 << 16) | 0xAAAAAAAAAA000000;
+  //         tx_frame.flags = TWAI_MSG_FLAG_NONE;
+  //         tx_frame.identifier = 0x7DF;
+  //         tx_frame.data_length_code = 8;
+  //         tx_frame.data[0] = 0x02;
+  //         tx_frame.data[1] = 0x01;
+  //         tx_frame.data[2] = 0x05;
+  //         tx_frame.data[3] = 0xAA;
+  //         tx_frame.data[4] = 0xAA;
+  //         tx_frame.data[5] = 0xAA;
+  //         tx_frame.data[6] = 0xAA;
+  //         tx_frame.data[7] = 0xAA;
+  //       break;
+  //       case 2:
+  //         //tx_frame.data = 0x2 | (0x01 << 8) | (0x42 << 16) | 0xAAAAAAAAAA000000;
+  //         tx_frame.flags = TWAI_MSG_FLAG_NONE;
+  //         tx_frame.identifier = 0x7DF;
+  //         tx_frame.data_length_code = 8;
+  //         tx_frame.data[0] = 0x02;
+  //         tx_frame.data[1] = 0x01;
+  //         tx_frame.data[2] = 0x42;
+  //         tx_frame.data[3] = 0xAA;
+  //         tx_frame.data[4] = 0xAA;
+  //         tx_frame.data[5] = 0xAA;
+  //         tx_frame.data[6] = 0xAA;
+  //         tx_frame.data[7] = 0xAA;
+  //       break;
+  //     }
+
+  //     twai_clear_transmit_queue();
+  //     error_t error = twai_transmit(&tx_frame, pdMS_TO_TICKS(100));
+  //     if(error != ESP_OK){
+  //       Serial.print("CAN Transmit Error ");
+  //       Serial.println(esp_err_to_name(error));
+  //       if(error == ESP_ERR_INVALID_STATE){
+  //         Serial.println("Attemting recovery");
+  //         error = twai_initiate_recovery();
+  //         if(error != ESP_OK){
+  //           Serial.print("recovery failled ");
+  //           Serial.println(esp_err_to_name(error));
+  //           if(error == ESP_ERR_INVALID_STATE){
+  //             Serial.println("Attemting driver reinstall");
+  //             twai_driver_uninstall();
+  //             error = setup_can_driver();
+  //           }
+  //         }else{
+  //           Serial.print("recovery success ");
+  //         }
+  //       }
+  //     }else{
+  //       canWaitingMsg = 1;
+  //       cantmout = millis();
+  //     }
       
 
-    }else if(canWaitingMsg && rx_error == ESP_OK){
-      // errorType = CAN.readMessage(&inMSG);
-      // if(errorType){
-      //   Serial.println(errorType);
-      //   errorType = 0;
-      // }
-      if( rx_frame.identifier == 0x7e8 && rx_frame.data[1] > 0x40 && rx_frame.data[0] > 0x02){
-        Serial.println("CAN got something");
-        switch(rx_frame.data[2]){
-          case 0x0C:
-            engineRPM = ((rx_frame.data[3] << 8) | rx_frame.data[4]) * 0.25;
-            Serial.println(engineRPM);
-            //engineRPM = ((rx_frame.data.u64 & 0xFFFF000000) >> 24) *0.25;
-          break;
-          case 0x05:
-            engineTemp = (rx_frame.data[3]) - 40;
-            Serial.println(engineTemp);
-            //engineTemp = ((rx_frame.data.u64 & 0xFF000000) >> 24) - 40;
-          break;
-          case 0x42:
-            ecuVoltage = ((rx_frame.data[3] << 8) | rx_frame.data[4]) * 0.001;
-            Serial.println(ecuVoltage);
-            //ecuVoltage = ((rx_frame.data.u64 & 0xFFFF000000) >> 24) * 0.001;
-          break;
-          default:
-          Serial.println(rx_frame.data[0]);
-          Serial.println(rx_frame.data[1]);
-          Serial.println(rx_frame.data[2]);
-          Serial.println(rx_frame.data[3]);
-          Serial.println(rx_frame.data[4]);
-          Serial.println(rx_frame.data[5]);
-          Serial.println(rx_frame.data[6]);
-          Serial.println(rx_frame.data[7]);
-          break;
-        }
-        canWaitingMsg = 0;
-        msgType++;
-        if(msgType > 2){
-          msgType = 0;
-        }
-      }else{
-        Serial.println("CAN got something else");
-        Serial.println(rx_frame.identifier);
-        Serial.println(rx_frame.data[0]);
-        Serial.println(rx_frame.data[1]);
-        Serial.println(rx_frame.data[2]);
-        Serial.println(rx_frame.data[3]);
-        Serial.println(rx_frame.data[4]);
-        Serial.println(rx_frame.data[5]);
-        Serial.println(rx_frame.data[6]);
-        Serial.println(rx_frame.data[7]);
-      }
-    }else if(millis() - cantmout > canRXtmout && canWaitingMsg){
-      Serial.println("CAN request timeout");
-      canWaitingMsg = 0;
-    }
+  //   }else if(canWaitingMsg && rx_error == ESP_OK){
+  //     // errorType = CAN.readMessage(&inMSG);
+  //     // if(errorType){
+  //     //   Serial.println(errorType);
+  //     //   errorType = 0;
+  //     // }
+  //     if( rx_frame.identifier == 0x7e8 && rx_frame.data[1] > 0x40 && rx_frame.data[0] > 0x02){
+  //       Serial.println("CAN got something");
+  //       switch(rx_frame.data[2]){
+  //         case 0x0C:
+  //           engineRPM = ((rx_frame.data[3] << 8) | rx_frame.data[4]) * 0.25;
+  //           Serial.println(engineRPM);
+  //           //engineRPM = ((rx_frame.data.u64 & 0xFFFF000000) >> 24) *0.25;
+  //         break;
+  //         case 0x05:
+  //           engineTemp = (rx_frame.data[3]) - 40;
+  //           Serial.println(engineTemp);
+  //           //engineTemp = ((rx_frame.data.u64 & 0xFF000000) >> 24) - 40;
+  //         break;
+  //         case 0x42:
+  //           ecuVoltage = ((rx_frame.data[3] << 8) | rx_frame.data[4]) * 0.001;
+  //           Serial.println(ecuVoltage);
+  //           //ecuVoltage = ((rx_frame.data.u64 & 0xFFFF000000) >> 24) * 0.001;
+  //         break;
+  //         default:
+  //         Serial.println(rx_frame.data[0]);
+  //         Serial.println(rx_frame.data[1]);
+  //         Serial.println(rx_frame.data[2]);
+  //         Serial.println(rx_frame.data[3]);
+  //         Serial.println(rx_frame.data[4]);
+  //         Serial.println(rx_frame.data[5]);
+  //         Serial.println(rx_frame.data[6]);
+  //         Serial.println(rx_frame.data[7]);
+  //         break;
+  //       }
+  //       canWaitingMsg = 0;
+  //       msgType++;
+  //       if(msgType > 2){
+  //         msgType = 0;
+  //       }
+  //     }else{
+  //       Serial.println("CAN got something else");
+  //       Serial.println(rx_frame.identifier);
+  //       Serial.println(rx_frame.data[0]);
+  //       Serial.println(rx_frame.data[1]);
+  //       Serial.println(rx_frame.data[2]);
+  //       Serial.println(rx_frame.data[3]);
+  //       Serial.println(rx_frame.data[4]);
+  //       Serial.println(rx_frame.data[5]);
+  //       Serial.println(rx_frame.data[6]);
+  //       Serial.println(rx_frame.data[7]);
+  //     }
+  //   }else if(millis() - cantmout > canRXtmout && canWaitingMsg){
+  //     Serial.println("CAN request timeout");
+  //     canWaitingMsg = 0;
+  //   }
 
-  }
+  // }
 
 }
 

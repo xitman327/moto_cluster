@@ -1,7 +1,7 @@
 // Copyright (c) Sandeep Mistry. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-#ifndef ARDUINO_ARCH_ESP32
+#ifndef ARDUINO_ARCH_ESP32_PREFER_JA1000
 
 #ifndef MCP2515_H
 #define MCP2515_H
@@ -17,8 +17,8 @@
 #define MCP2515_DEFAULT_CS_PIN          3
 #define MCP2515_DEFAULT_INT_PIN         7
 #else
-#define MCP2515_DEFAULT_CS_PIN          10
-#define MCP2515_DEFAULT_INT_PIN         2
+#define MCP2515_DEFAULT_CS_PIN          5
+#define MCP2515_DEFAULT_INT_PIN         4
 #endif
 
 class MCP2515Class : public CANControllerClass {

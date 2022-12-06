@@ -4,7 +4,7 @@
 #ifndef CAN_H
 #define CAN_H
 
-#ifdef ARDUINO_ARCH_ESP32
+#ifdef ARDUINO_ARCH_ESP32_PREFER_JA1000
 #include "ESP32SJA1000.h"
 #else
 #include "MCP2515.h"
