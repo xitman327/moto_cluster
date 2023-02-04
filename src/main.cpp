@@ -133,17 +133,6 @@ void Task1code( void * parameter) {
   gslc_InitDebug(&DebugOut);
   InitGUIslice_gen();
 
-  // tft.init();
-  // tft.setRotation(1);
-  // // tft.begin();
-  //  tft.fillScreen(TFT_BLACK);
-  //  //analogWrite(TFT_LED, 255);
-  //  ledcWrite(0, 100);
-  //  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-  //  tft.setTextSize(4);
-  //  tft.setCursor(10, 10);
-  //  tft.print("TFT OK!\n Hello World!");
-
    CAN.setPins(CAN_CS, CAN_INT);
   if (!OBD2.begin()) {
     Serial.println(F("CAN failed!"));
@@ -152,6 +141,7 @@ void Task1code( void * parameter) {
     OBD2.setTimeout(500);
   }
 
+  // move them to a looping function
   // sprintf(m_pElemXRingGauge1->pElem->pStrBuf, "%d", engineRPM);
   // gslc_ElemXRingGaugeSetVal(&m_gui, m_pElemXRingGauge1, engineRPM);
 
