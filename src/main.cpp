@@ -16,8 +16,8 @@ uint8_t animNumber;
 // #include <STM32RTC.h>
 // STM32RTC& rtc = STM32RTC::getInstance();
 
-// #include <TFT_eSPI.h>      // Graphics library
-// TFT_eSPI tft = TFT_eSPI(); // Invoke library
+#include <TFT_eSPI.h>      // Graphics library
+TFT_eSPI tft = TFT_eSPI(); // Invoke library
 
 // #include <Adafruit_GFX.h>
 // #include <ILI9488.h>
@@ -29,9 +29,10 @@ uint8_t animNumber;
 // #include <Adafruit_PCD8544.h>
 // Adafruit_PCD8544 display = Adafruit_PCD8544(TFT_DC, TFT_CS, TFT_RST);
 
-// #include <XPT2046.h>
-// XPT2046 touch(/*cs=*/ 25, /*irq=*/ 14);
+#include <XPT2046.h>
+XPT2046 touch(/*cs=*/ 25, /*irq=*/ 14);
 
+#include "gauge.h"
 
 #include <CAN.h> // the OBD2 library depends on the CAN library
 #include <OBD2.h>
@@ -107,14 +108,6 @@ bool start_anim_finished;
 byte anim_i;
 uint32_t default_anim[255] = {};
 
-#include "proj_GSLC.h"
-gslc_tsElemRef* m_gpsinfo1        = NULL;
-gslc_tsElemRef* m_gpsinfo1_4      = NULL;
-gslc_tsElemRef* m_pElemProgress1  = NULL;
-gslc_tsElemRef* m_pElemXRingGauge1= NULL;
-gslc_tsElemRef* m_pElemXRingGauge1_2= NULL;
-static int16_t DebugOut(char ch) { if (ch == (char)'\n') Serial.println(""); else Serial.write(ch); return 0; }
-
 void lighting();
 void handle_gps();
 void handle_sd();
@@ -124,14 +117,39 @@ void handle_sensors();
 void displayInfo();
 void handle_bright();
 void handle_ui();
+ 
+extern int ringMeter();
+
+void showmsgXY(int x, int y, int sz, const GFXfont *f, const char *msg)
+{
+  int16_t x1, y1;
+  uint16_t wid, ht;
+  //tft.setFont(f);
+  tft.setCursor(x, y);
+  tft.setTextSize(sz);
+  tft.println(msg);
+}
+
+int a = 1000;
+int b = 4000;
+int j, j2;
+int i, i2;
 
 TaskHandle_t Task1;
 void Task1code( void * parameter) {
   Serial.print("Task2 running on core ");
   Serial.println(xPortGetCoreID());
 
-  gslc_InitDebug(&DebugOut);
-  InitGUIslice_gen();
+  tft.begin();
+  tft.setRotation(1);
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE);
+  //tft.setTextSize(3);
+
+  //tft.drawRGBBitmap(0, 0, test, 480, 320);
+  // tft.drawBitmap(0,0, &test,480,320,TFT_BLACK);
+
+
 
    CAN.setPins(CAN_CS, CAN_INT);
   if (!OBD2.begin()) {
@@ -271,21 +289,61 @@ void loop() {
 
 }
 
+#define RED2RED 0
+#define GREEN2GREEN 1
+#define BLUE2BLUE 2
+#define BLUE2RED 3
+#define GREEN2RED 4
+#define RED2GREEN 5
 
 #define ui_refresh 100
 uint32_t ui_tm;
 bool ui_start;
+int reading = 0; // Value to be displayed
+int d = 0; // Variable used for the sinewave test waveform
 void handle_ui(){
   if(millis() - ui_tm > ui_refresh){
       ui_tm = millis();
 
     if(!ui_start){
       ui_start = 1;
-
     }
-  }
 
-  gslc_Update(&m_gui);
+    // Test with a slowly changing value from a Sine function
+    d += 5; if (d >= 360) d = 0;
+
+    // Set the the position, gap between meters, and inner radius of the meters
+    int xpos = 0, ypos = 5, gap = 4, radius = 52;
+
+    // Draw meter and get back x position of next meter
+
+    // Test with Sine wave function, normally reading will be from a sensor
+    reading = 250 + 250 * sineWave(d+0);
+    //xpos = gap + ringMeter(reading, 0, 500, xpos, ypos, radius, "mA", GREEN2RED); // Draw analogue meter
+
+    //reading = 20 + 30 * sineWave(d+60);
+    //xpos = gap + ringMeter(reading, -10, 50, xpos, ypos, radius, "degC", BLUE2RED); // Draw analogue meter
+
+    //reading = 50 + 50 * sineWave(d + 120);
+    //ringMeter(reading, 0, 100, xpos, ypos, radius, "%RH", BLUE2BLUE); // Draw analogue meter
+
+
+    // Draw two more larger meters
+    //xpos = 20, ypos = 115, gap = 24, radius = 64;
+
+    //reading = 1000 + 150 * sineWave(d + 90);
+    //xpos = gap + ringMeter(reading, 850, 1150, xpos, ypos, radius, "mb", BLUE2RED); // Draw analogue meter
+
+    //reading = 15 + 15 * sineWave(d + 150);
+    //xpos = gap + ringMeter(reading, 0, 30, xpos, ypos, radius, "Volts", GREEN2GREEN); // Draw analogue meter
+
+    // Draw a large meter
+    xpos = 40, ypos = 5, gap = 15, radius = 120;
+    //reading = 175;
+    // Comment out above meters, then uncomment the next line to show large meter
+    ringMeter(reading,0,500, xpos,ypos,radius," Watts",GREEN2RED); // Draw analogue meter
+
+  }
 }
 
 
