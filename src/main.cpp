@@ -12,13 +12,25 @@ bool sd_ok, sd_err;
 //const char* anim_filenames[10] PROGMEM={"/ANI/0.txt", "/ANI/1.txt", "/ANI/2.txt", "/ANI/3.txt", "/ANI/4.txt","/ANI/5.txt","/ANI/6.txt","/ANI/7.txt","/ANI/8.txt","/ANI/9.txt"};
 uint8_t animNumber;
 
+#include "LittleFS.h"
+#define SPIFFS LittleFS
+
+#if defined(ARDUINO_ARCH_ESP8266)
+//no need with latest esp8266 core
+#define pathToFileName(p) p
+#endif //ARDUINO_ARCH_ESP8266
+#undef log_esp
+#undef log_esps
+#define DEBUG_OUTPUT_SERIAL Serial
+#define log_esp(format, ...) DEBUG_OUTPUT_SERIAL.printf("[ESP:%d][%s:%u] %s(): " format "\r\n", xPortGetCoreID(), pathToFileName(__FILE__), __LINE__, __FUNCTION__, ##__VA_ARGS__)
+#define log_esps(format, ...) DEBUG_OUTPUT_SERIAL.printf(format, ##__VA_ARGS__)
 
 // #include <STM32RTC.h>
 // STM32RTC& rtc = STM32RTC::getInstance();
 
-#include <TFT_eSPI.h>      // Graphics library
-TFT_eSPI tft = TFT_eSPI(); // Invoke library
-
+//#include <TFT_eSPI.h>      // Graphics library
+//TFT_eSPI tft = TFT_eSPI(); // Invoke library
+#define TFT_GREY 0x5AEB
 // #include <Adafruit_GFX.h>
 // #include <ILI9488.h>
 // #define TFT_CS         26
@@ -29,10 +41,10 @@ TFT_eSPI tft = TFT_eSPI(); // Invoke library
 // #include <Adafruit_PCD8544.h>
 // Adafruit_PCD8544 display = Adafruit_PCD8544(TFT_DC, TFT_CS, TFT_RST);
 
-#include <XPT2046.h>
-XPT2046 touch(/*cs=*/ 25, /*irq=*/ 14);
-
-#include "gauge.h"
+// #include <XPT2046.h>
+// XPT2046 touch(/*cs=*/ 25, /*irq=*/ 14);
+#include "display_stuff.h"
+// #include "gauge.h"
 
 #include <CAN.h> // the OBD2 library depends on the CAN library
 #include <OBD2.h>
@@ -116,46 +128,28 @@ void handle_can();
 void handle_sensors();
 void displayInfo();
 void handle_bright();
-void handle_ui();
+extern void handle_ui();
  
-extern int ringMeter();
-
-void showmsgXY(int x, int y, int sz, const GFXfont *f, const char *msg)
-{
-  int16_t x1, y1;
-  uint16_t wid, ht;
-  //tft.setFont(f);
-  tft.setCursor(x, y);
-  tft.setTextSize(sz);
-  tft.println(msg);
-}
-
-int a = 1000;
-int b = 4000;
-int j, j2;
-int i, i2;
+extern void init_lcd(void);
+// extern int ringMeter();
 
 TaskHandle_t Task1;
 void Task1code( void * parameter) {
-  Serial.print("Task2 running on core ");
-  Serial.println(xPortGetCoreID());
-
-  tft.begin();
-  tft.setRotation(1);
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_WHITE);
-  //tft.setTextSize(3);
-
-  //tft.drawRGBBitmap(0, 0, test, 480, 320);
-  // tft.drawBitmap(0,0, &test,480,320,TFT_BLACK);
+  // Serial.print("Task2 running on core ");
+  // Serial.println(xPortGetCoreID());
+  log_esp("Task Running in core: %d", xPortGetCoreID());
+  
+  init_lcd();
 
 
 
    CAN.setPins(CAN_CS, CAN_INT);
   if (!OBD2.begin()) {
-    Serial.println(F("CAN failed!"));
+    //Serial.println(F("CAN failed!"));
+    log_esp("CAN Failled");
   } else {
-    Serial.println(F("CAN success"));
+    //Serial.println(F("CAN success"));
+    log_esp("CAN Success");
     OBD2.setTimeout(500);
   }
 
@@ -171,47 +165,58 @@ void Task1code( void * parameter) {
 }
 
 void setup() {
+  Serial.begin(115200);
+  log_esp("starting");
+
+  if (!SPIFFS.begin()) {
+    //Serial.println("formating file system");
+    log_esp("formating file system");
+
+    SPIFFS.format();
+    SPIFFS.begin();
+  }else{
+    log_esp("SPIFFS ok");
+  }
 
   //init first for debugging
-  Serial.begin(115200);
-  Serial.println("starting...........");
-  Serial.println("Serial ok");
+  
+  // Serial.println("starting...........");
+  // Serial.println("Serial ok");
 
   xTaskCreatePinnedToCore(
       Task1code, /* Function to implement the task */
       "Task1", /* Name of the task */
-      10000,  /* Stack size in words */
+      20000,  /* Stack size in words */ // incresed from 1000
       NULL,  /* Task input parameter */
       0,  /* Priority of the task */
       &Task1,  /* Task handle. */
       0); /* Core where the task should run */
       
-  Serial.print("Task1 running on core ");
-  Serial.println(xPortGetCoreID());
+  // Serial.print("Task1 running on core ");
+  // Serial.println(xPortGetCoreID());
+  log_esp("Task Running in core: %d", xPortGetCoreID());
 
+  analogReadResolution(12);
   pinMode(LIGHT_SENSOR, ANALOG);
   pinMode(TFT_LED, OUTPUT);
   ledcSetup(0, 5000, 8);
   ledcAttachPin(TFT_LED, 0);
    
-
   //init neopixels
   pixels.begin();
   pixels.clear();
   pixels.setBrightness(5);
-  //pixels.setPixelColor(2, 0xffff00);
   pixels.show();
-  // pixels.fill(pixels.Color(255,0,0), 0, 2);
-  // pixels.fill(pixels.Color(255,255,0), 3, 14);
-  Serial.println("neopixel ok");
+  log_esp("Neopixel OK");
 
   //serial for gps
-  GPSSERIAL.begin(9600, SERIAL_8N1, 16, 17);
+  //GPSSERIAL.begin(9600, SERIAL_8N1, 16, 17);
+  GPSSERIAL.begin(9600);
   while(!GPSSERIAL.available() && millis() < 5000){}
   if(gps.encode(GPSSERIAL.read())){
-    Serial.println("gps ok");
+    log_esp("gps ok");
   }else{
-    Serial.println("gps fail");
+    log_esp("gps fail");
   }
   
 
@@ -219,8 +224,6 @@ void setup() {
   //Serial.begin(115200);
 
   //i2c for sensors
-  // Wire.setSCL(PB10);
-  // Wire.setSDA(PB11);
   Wire.begin();
   Wire.beginTransmission(MPU6050_ADDRESS);
   mpu_ok = Wire.endTransmission() == 0;
@@ -229,9 +232,9 @@ void setup() {
   //mpu_ok = mpu.begin(MPU6050_SCALE_2000DPS, MPU6050_RANGE_2G);
   if(mpu_ok){
     mpu.begin(MPU6050_SCALE_2000DPS, MPU6050_RANGE_2G);
-    Serial.println("MPU ok");
+    log_esp("MPU ok");
   }else{
-    Serial.println("MPU failled");
+    log_esp("MPU failled");
   }
     
 
@@ -251,9 +254,9 @@ void setup() {
     compass.setSamples(HMC5883L_SAMPLES_8);
     // Set calibration offset. See HMC5883L_calibration.ino
     compass.setOffset(0, 0); 
-    Serial.println("HMC ok");
+    log_esp("HMC ok");
   }else{
-    Serial.println("HMC failled");
+    log_esp("HMC failled");
   }
 
   Wire.beginTransmission(AHTXX_ADDRESS_X38);
@@ -261,19 +264,19 @@ void setup() {
   //initialize temp/humid sensor
   if(tmp_ok){
     aht10.begin();
-    Serial.println("TMP ok");
+    log_esp("TMP ok");
   }else{
-    Serial.println("TMP failled");
+    log_esp("TMP failled");
   }
 
   pinMode(SD_DET, INPUT_PULLUP);
   if(digitalRead(SD_DET) == HIGH){
-    Serial.println("sdcard not present");
+    log_esp("sdcard not present");
   }else{
-    Serial.println("sdcard pressent");
+    log_esp("sdcard pressent");
   }
 
-  Serial.println("END SETUP");
+  log_esp("END SETUP");
 
 }
 
@@ -289,73 +292,22 @@ void loop() {
 
 }
 
-#define RED2RED 0
-#define GREEN2GREEN 1
-#define BLUE2BLUE 2
-#define BLUE2RED 3
-#define GREEN2RED 4
-#define RED2GREEN 5
+#include <EMA.h>
 
-#define ui_refresh 100
-uint32_t ui_tm;
-bool ui_start;
-int reading = 0; // Value to be displayed
-int d = 0; // Variable used for the sinewave test waveform
-void handle_ui(){
-  if(millis() - ui_tm > ui_refresh){
-      ui_tm = millis();
+static EMA<2> EMA_filter;
 
-    if(!ui_start){
-      ui_start = 1;
-    }
-
-    // Test with a slowly changing value from a Sine function
-    d += 5; if (d >= 360) d = 0;
-
-    // Set the the position, gap between meters, and inner radius of the meters
-    int xpos = 0, ypos = 5, gap = 4, radius = 52;
-
-    // Draw meter and get back x position of next meter
-
-    // Test with Sine wave function, normally reading will be from a sensor
-    reading = 250 + 250 * sineWave(d+0);
-    //xpos = gap + ringMeter(reading, 0, 500, xpos, ypos, radius, "mA", GREEN2RED); // Draw analogue meter
-
-    //reading = 20 + 30 * sineWave(d+60);
-    //xpos = gap + ringMeter(reading, -10, 50, xpos, ypos, radius, "degC", BLUE2RED); // Draw analogue meter
-
-    //reading = 50 + 50 * sineWave(d + 120);
-    //ringMeter(reading, 0, 100, xpos, ypos, radius, "%RH", BLUE2BLUE); // Draw analogue meter
-
-
-    // Draw two more larger meters
-    //xpos = 20, ypos = 115, gap = 24, radius = 64;
-
-    //reading = 1000 + 150 * sineWave(d + 90);
-    //xpos = gap + ringMeter(reading, 850, 1150, xpos, ypos, radius, "mb", BLUE2RED); // Draw analogue meter
-
-    //reading = 15 + 15 * sineWave(d + 150);
-    //xpos = gap + ringMeter(reading, 0, 30, xpos, ypos, radius, "Volts", GREEN2GREEN); // Draw analogue meter
-
-    // Draw a large meter
-    xpos = 40, ypos = 5, gap = 15, radius = 120;
-    //reading = 175;
-    // Comment out above meters, then uncomment the next line to show large meter
-    ringMeter(reading,0,500, xpos,ypos,radius," Watts",GREEN2RED); // Draw analogue meter
-
-  }
-}
-
-
-#define brt_refresh 100
+#define brt_refresh 20
 uint32_t brt_tm;
-int bright_min = 10, bright_max = 255, brightness;
+int bright_min = 20, bright_max = 255, brightness;
+uint16_t ain_light_sensor;
 void handle_bright(){
   if(millis() - brt_tm > brt_refresh){
       brt_tm = millis();
-      brightness = map(analogRead(LIGHT_SENSOR), 0, 4095, bright_max, bright_min);
+      uint16_t ainin = analogRead(LIGHT_SENSOR);
+      ain_light_sensor = EMA_filter(ainin);
+      brightness = map(ain_light_sensor, 0, 4096, bright_max, bright_min);
       ledcWrite(0, brightness);
-      pixels.setBrightness(brightness);
+      pixels.setBrightness(brightness * 0.2);
     }
 }
 
@@ -368,7 +320,7 @@ void handle_gps(){
     tmgps = millis();
     displayInfo();
   }
-  if( GPSSERIAL.available() ) {
+  while( GPSSERIAL.available() ) {
     gps.encode(GPSSERIAL.read());
   }
 
@@ -383,16 +335,16 @@ void handle_sd(){
     if(!SD.begin(SD_CS)){
       sd_ok = 0;
       sd_err = 1;
-      Serial.println("SDCARD ERROR!");
+      log_esp("SDCARD ERROR!");
     }else{
       sd_ok = 1;
-      Serial.println("SDCARD MOUNTED!");
+      log_esp("SDCARD MOUNTED!");
     }
   }else if(digitalRead(SD_DET) && (sd_ok || sd_err)){
     SD.end();
     sd_ok = 0;
     sd_err = 0;
-    Serial.println("SDCARD EJECTED");
+    log_esp("SDCARD EJECTED");
   }
   
   if(sd_ok && !start_anim_finished){
@@ -412,8 +364,8 @@ void handle_sd(){
     sprintf(tms, "/ANI/%d.txt", anim_number);
     if(SD.exists( tms)){
       myFile = SD.open(tms);
-      Serial.print("oppened file ");
-      Serial.println(tms);
+      log_esp("oppened file %s", tms);
+      // Serial.println(tms);
       sdAnimFPS = myFile.parseInt();
       // Serial.println(sdAnimFPS);
       sdAnimBrightness = myFile.parseInt();
@@ -429,12 +381,12 @@ void handle_sd(){
       playAnim( sdpixeldata , sdAnimFPS, sdAnimLength, false, false);
       start_anim_finished = 1;
     }else{
-      Serial.println("no animation exist");
+      log_esp("no animation exist");
       playAnim( paternPixelData , neoAnimFPS, ANIM_LENGTH, false, true);
       start_anim_finished = 1;
     }
   }else if((sd_err || digitalRead(SD_DET)) && !start_anim_finished){
-    Serial.println("no sd exist");
+    log_esp("no sd exist");
     playAnim( paternPixelData , neoAnimFPS, ANIM_LENGTH, false, true);
     start_anim_finished = 1;
   }
@@ -487,10 +439,10 @@ void lighting(){
       if(pixelIdx >= pixelLen) { // End of animation table reached
         if(pixelLoop) { // Repeat animation
           pixelIdx = 0; // Reset index to start of table
-          Serial.println("animation repeat");
+          log_esp("animation repeat");
         } else {        // else switch off LEDs
           playAnim(NULL, neoAnimFPS, 0, false, false);
-          Serial.println("animation end");
+          log_esp("animation end");
         }
       } 
     }
@@ -686,7 +638,7 @@ void displayInfo()
 }
 
 void parse_ui(){
-  Serial.println("Parsing ui...");
+  log_esp("Parsing ui...");
 
   if(sd_ok){
     if(SD.exists("/ui1.txt")){
